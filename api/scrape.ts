@@ -6,7 +6,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 // Standard Node.js Serverless Handler for Vercel
 export default async function handler(req: any, res: any) {
   // 1. Setup CORS (Crucial for external access)
-  res.setHeader('Access-Control-Allow-Origin', '*'); // Allow any website to call this
+  res.setHeader('Access-Control-Allow-Origin', '*'); 
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Content-Type', 'application/json');
@@ -22,27 +22,50 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    // Vercel automatically parses JSON body if Content-Type is application/json
     const { siteUrl } = req.body || {};
 
     if (!siteUrl) {
       return res.status(400).json({ error: 'siteUrl is required in the request body.' });
     }
 
-    // 4. Gemini Scraper Logic
-    const prompt = `
-      Access the website ${siteUrl} using Google Search.
-      Find the absolute latest updated anime episodes or movies listed on the homepage or latest updates section.
-      
-      Extract the following strictly for each item:
-      1. **Title**: The full title of the anime or movie.
-      2. **Quality/Episode**: The specific Episode number (e.g., "Ep 12") or Quality (e.g., "1080p", "HD").
-      3. **Post URL**: The direct link to the watch page on the site.
-      4. **Video Source**: actively look for the **Video Streaming Link** (ends in .mp4, .m3u8) or the **Embed URL** (iframe src from servers like blogger, video servers, etc.) associated with this episode. If a direct video link isn't found, try to find the "Download" link.
-      5. **Image**: The thumbnail URL.
+    const isYoutube = siteUrl.includes('youtube.com') || siteUrl.includes('youtu.be');
 
-      Return purely JSON data.
-    `;
+    // 4. Construct Prompt based on Source
+    let prompt = '';
+
+    if (isYoutube) {
+      prompt = `
+        Access the YouTube URL: ${siteUrl} using Google Search.
+        Determine if this is a Channel, a Playlist, or a Single Video.
+
+        1. **If it is a Channel**: List the 8 most recent videos uploaded.
+        2. **If it is a Playlist**: List the first 8 videos in the playlist.
+        3. **If it is a Single Video**: Extract details for just that video.
+
+        Extract strictly:
+        - **Title**: Video title.
+        - **URL**: Full YouTube watch URL (e.g. https://www.youtube.com/watch?v=ID).
+        - **Quality**: If available, put "4K", "HD", or the duration (e.g. "10:05").
+        - **Image**: The high-res thumbnail URL.
+        - **Embed URL**: Construct the embed link (https://www.youtube.com/embed/VIDEO_ID).
+
+        Return purely JSON data.
+      `;
+    } else {
+      prompt = `
+        Access the website ${siteUrl} using Google Search.
+        Find the absolute latest updated anime episodes or movies listed on the homepage or latest updates section.
+        
+        Extract the following strictly for each item:
+        1. **Title**: The full title of the anime or movie.
+        2. **Quality/Episode**: The specific Episode number (e.g., "Ep 12") or Quality (e.g., "1080p", "HD").
+        3. **Post URL**: The direct link to the watch page on the site.
+        4. **Video Source**: actively look for the **Video Streaming Link** (ends in .mp4, .m3u8) or the **Embed URL** (iframe src from servers like blogger, video servers, etc.) associated with this episode. If a direct video link isn't found, try to find the "Download" link.
+        5. **Image**: The thumbnail URL.
+
+        Return purely JSON data.
+      `;
+    }
 
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -79,11 +102,11 @@ export default async function handler(req: any, res: any) {
     const cleanedData = parsedData.map((item: any) => ({
       title: item.title,
       url: item.url || siteUrl,
-      quality: item.quality || 'Unknown',
-      image: item.image || `https://picsum.photos/seed/${encodeURIComponent(item.title)}/300/450`,
-      videoUrl: item.videoUrl || null,
+      quality: item.quality || 'HD',
+      image: item.image || `https://i.ytimg.com/vi/default/hqdefault.jpg`,
+      videoUrl: item.videoUrl || item.url, // For YT, videoUrl is often just the watch link
       embedUrl: item.embedUrl || null,
-      source: siteUrl,
+      source: isYoutube ? 'YouTube' : siteUrl,
       uploadedAt: new Date().toISOString()
     }));
 
