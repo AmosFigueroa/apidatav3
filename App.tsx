@@ -13,11 +13,12 @@ import {
   Youtube,
   Link as LinkIcon,
   Video,
-  LayoutGrid
+  LayoutGrid,
+  Tv
 } from 'lucide-react';
 
 const App: React.FC = () => {
-  const [customUrl, setCustomUrl] = useState<string>(TargetSite.KURAMANIME);
+  const [customUrl, setCustomUrl] = useState<string>(TargetSite.MUSE_ID);
   const [data, setData] = useState<ScrapedItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,11 +44,22 @@ const App: React.FC = () => {
 
   const handlePresetClick = (url: string) => {
     setCustomUrl(url);
+    // Optional: Auto fetch on click
+    // handleFetch(); 
   };
 
   // Stats for the "Courier" dashboard
   const videoCount = data.filter(i => i.type === 'video').length;
   const cardCount = data.filter(i => i.type === 'card').length;
+
+  const presets = [
+    { label: 'Muse Indonesia', url: TargetSite.MUSE_ID, icon: Youtube, color: 'text-red-400' },
+    { label: 'Ani-One Indo', url: TargetSite.ANIONE_ID, icon: Youtube, color: 'text-red-400' },
+    { label: 'Tropics Anime', url: TargetSite.TROPICS_ID, icon: Youtube, color: 'text-red-400' },
+    { label: 'Bstation (ID)', url: TargetSite.BSTATION, icon: Tv, color: 'text-blue-400' },
+    { label: 'Kuramanime', url: TargetSite.KURAMANIME, icon: Globe, color: 'text-slate-400' },
+    { label: 'Samehadaku', url: TargetSite.SAMEHADAKU, icon: Globe, color: 'text-slate-400' },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 pb-20">
@@ -59,12 +71,12 @@ const App: React.FC = () => {
               <div className="bg-blue-600 p-2 rounded-lg">
                 <Database className="text-white" size={20} />
               </div>
-              <span className="font-bold text-xl tracking-tight text-white">ScraperAPI</span>
+              <span className="font-bold text-xl tracking-tight text-white">AnimeScraper<span className="text-blue-500">ID</span></span>
             </div>
             <div className="flex items-center gap-4">
                <span className="hidden md:flex items-center gap-2 text-xs text-green-400 bg-green-900/20 px-3 py-1 rounded-full border border-green-900/50">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  Direct Mode
+                  Official Sources Ready
                </span>
             </div>
           </div>
@@ -75,10 +87,10 @@ const App: React.FC = () => {
         {/* Header Section */}
         <div className="text-center mb-12">
           <h1 className="text-4xl md:text-5xl font-extrabold text-white mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
-            Universal Data Extractor
+            Legal Anime Distributor API
           </h1>
           <p className="text-slate-400 max-w-2xl mx-auto text-lg">
-            Acts as a raw data courier. Fetches all embedded videos, episodes, and metadata for your frontend to consume.
+            Extract real-time video lists from official YouTube channels (Muse, Ani-One) and Bstation Indonesia.
           </p>
         </div>
 
@@ -87,7 +99,7 @@ const App: React.FC = () => {
           
           {/* Input Section */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-slate-400 mb-2">Target URL</label>
+            <label className="block text-sm font-medium text-slate-400 mb-2">Target Channel / URL</label>
             <div className="flex gap-2">
               <div className="relative flex-grow">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -97,7 +109,7 @@ const App: React.FC = () => {
                   type="text"
                   value={customUrl}
                   onChange={(e) => setCustomUrl(e.target.value)}
-                  placeholder="Paste URL (e.g., https://youtube.com/watch?v=... or https://samehadaku.care/)"
+                  placeholder="Paste YouTube Channel URL or Bstation URL..."
                   className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-600 transition-all"
                 />
               </div>
@@ -109,18 +121,18 @@ const App: React.FC = () => {
                 className={`flex-shrink-0 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold text-white transition-all ${
                   loading 
                     ? 'bg-slate-700 cursor-wait opacity-70' 
-                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-lg shadow-blue-900/20'
+                    : 'bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 shadow-lg shadow-red-900/20'
                 }`}
               >
                 {loading ? (
                   <>
                     <RefreshCw className="animate-spin" size={20} />
-                    Extracting...
+                    Fetching...
                   </>
                 ) : (
                   <>
                     <Search size={20} />
-                    Scrape
+                    Get Videos
                   </>
                 )}
               </button>
@@ -128,34 +140,19 @@ const App: React.FC = () => {
           </div>
 
           {/* Preset Buttons */}
-          <div className="flex flex-col sm:flex-row items-center gap-4 border-t border-slate-800 pt-6">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Quick Select:</span>
-            <div className="flex flex-wrap gap-2">
-              {Object.values(TargetSite).map((site) => {
-                let label = '';
-                let Icon = Globe;
-                let colorClass = 'text-slate-400 hover:text-white hover:bg-slate-700';
-
-                if (site.includes('kurama')) label = 'Kuramanime';
-                else if (site.includes('sameha')) label = 'Samehadaku';
-                else if (site.includes('movie')) label = 'MovieBox';
-                else if (site.includes('youtube')) {
-                  label = 'YouTube (General)';
-                  Icon = Youtube;
-                  colorClass = 'text-red-400 hover:text-red-100 hover:bg-red-900/20 border-red-900/30';
-                }
-
-                return (
-                  <button
-                    key={site}
-                    onClick={() => handlePresetClick(site)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-slate-700 transition-all ${colorClass} ${customUrl === site ? 'bg-slate-800 border-slate-600' : 'bg-transparent'}`}
-                  >
-                    <Icon size={14} />
-                    {label}
-                  </button>
-                );
-              })}
+          <div className="flex flex-col gap-3 border-t border-slate-800 pt-6">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Official Channels (Indonesia):</span>
+            <div className="flex flex-wrap gap-3">
+              {presets.map((preset) => (
+                <button
+                  key={preset.label}
+                  onClick={() => handlePresetClick(preset.url)}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium border border-slate-700 transition-all ${preset.color} hover:bg-slate-800 ${customUrl === preset.url ? 'bg-slate-800 border-slate-600 ring-1 ring-slate-500' : 'bg-slate-900/50'}`}
+                >
+                  <preset.icon size={16} />
+                  {preset.label}
+                </button>
+              ))}
             </div>
           </div>
           
@@ -189,7 +186,7 @@ const App: React.FC = () => {
           {!loading && !error && data.length === 0 && (
             <div className="flex flex-col items-center justify-center h-64 text-slate-500 border-2 border-dashed border-slate-800 rounded-xl">
               <Search size={48} className="mb-4 opacity-20" />
-              <p>Enter a URL to courier data.</p>
+              <p>Select a channel or paste a URL to start.</p>
             </div>
           )}
 

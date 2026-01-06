@@ -11,10 +11,12 @@ export interface ScrapedItem {
 }
 
 export enum TargetSite {
+  MUSE_ID = 'https://www.youtube.com/@MuseIndonesia/videos',
+  ANIONE_ID = 'https://www.youtube.com/@AniOneIndonesia/videos',
+  TROPICS_ID = 'https://www.youtube.com/@TropicsAnimeAsia/videos', // As requested
+  BSTATION = 'https://www.bilibili.tv/id',
   KURAMANIME = 'https://v9.kuramanime.tel/',
-  SAMEHADAKU = 'https://samehadaku.care/',
-  MOVIEBOX = 'https://moviebox.ph/',
-  YOUTUBE = 'https://www.youtube.com/'
+  SAMEHADAKU = 'https://samehadaku.care/'
 }
 
 export interface ApiResponse {
