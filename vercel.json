@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/scrape.ts": {
+      "maxDuration": 60
+    }
+  }
+}
