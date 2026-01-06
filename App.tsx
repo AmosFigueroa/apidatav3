@@ -11,7 +11,9 @@ import {
   Search,
   AlertCircle,
   Youtube,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Video,
+  LayoutGrid
 } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -29,7 +31,6 @@ const App: React.FC = () => {
     setData([]);
     
     try {
-      // We pass the string directly, ignoring the enum type constraint in the service
       const result = await fetchSiteData(customUrl as any);
       setData(result);
       setLastUpdated(new Date().toLocaleTimeString());
@@ -43,6 +44,10 @@ const App: React.FC = () => {
   const handlePresetClick = (url: string) => {
     setCustomUrl(url);
   };
+
+  // Stats for the "Courier" dashboard
+  const videoCount = data.filter(i => i.type === 'video').length;
+  const cardCount = data.filter(i => i.type === 'card').length;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 pb-20">
@@ -73,7 +78,7 @@ const App: React.FC = () => {
             Universal Data Extractor
           </h1>
           <p className="text-slate-400 max-w-2xl mx-auto text-lg">
-            Directly scrape real-time data from Anime sites, Movie portals, or YouTube Videos.
+            Acts as a raw data courier. Fetches all embedded videos, episodes, and metadata for your frontend to consume.
           </p>
         </div>
 
@@ -161,7 +166,10 @@ const App: React.FC = () => {
                <span className="truncate max-w-[200px] md:max-w-md">Target: <span className="text-slate-300 font-mono">{customUrl}</span></span>
              </div>
              {lastUpdated && (
-               <span className="mt-2 sm:mt-0">Last Updated: {lastUpdated}</span>
+               <div className="flex items-center gap-4">
+                 <span className="flex items-center gap-1 text-blue-400"><Video size={12}/> {videoCount} Videos</span>
+                 <span className="flex items-center gap-1 text-purple-400"><LayoutGrid size={12}/> {cardCount} Cards</span>
+               </div>
              )}
           </div>
         </div>
@@ -174,11 +182,6 @@ const App: React.FC = () => {
               <div>
                 <h3 className="font-bold">Extraction Failed</h3>
                 <p>{error}</p>
-                {error.includes('403') && (
-                  <p className="text-xs mt-2 text-red-300 opacity-80">
-                    Note: Some sites block cloud servers (AWS/Vercel). Try a YouTube link or a less protected site.
-                  </p>
-                )}
               </div>
             </div>
           )}
@@ -186,7 +189,7 @@ const App: React.FC = () => {
           {!loading && !error && data.length === 0 && (
             <div className="flex flex-col items-center justify-center h-64 text-slate-500 border-2 border-dashed border-slate-800 rounded-xl">
               <Search size={48} className="mb-4 opacity-20" />
-              <p>Enter a URL or select a source to begin scraping.</p>
+              <p>Enter a URL to courier data.</p>
             </div>
           )}
 

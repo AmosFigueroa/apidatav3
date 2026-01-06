@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Copy, Check, Terminal } from 'lucide-react';
+import { Copy, Check, Terminal, Filter, Code } from 'lucide-react';
 
 export const ApiDocs: React.FC = () => {
   const [copied, setCopied] = useState(false);
@@ -10,20 +10,37 @@ export const ApiDocs: React.FC = () => {
   }, []);
 
   const exampleCode = `
-// REAL Production Usage
-// You can use this URL in ANY other website or app.
+// 1. Define Types (Optional, for TypeScript)
+interface ScrapedItem {
+  title: string;
+  url: string;
+  image?: string;
+  type: 'video' | 'card' | 'link'; // <--- KEY FIELD FOR FILTERING
+  videoUrl?: string; // Direct link (mp4/m3u8)
+  embedUrl?: string; // Iframe src
+}
 
-async function fetchAnimeData() {
+// 2. Fetch & Filter Function
+async function fetchAndFilterData(targetUrl: string) {
   const response = await fetch('${origin || 'https://your-app.vercel.app'}/api/scrape', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      siteUrl: 'https://v9.kuramanime.tel/'
-    })
+    body: JSON.stringify({ siteUrl: targetUrl })
   });
   
-  const { data } = await response.json();
-  console.log(data);
+  const json = await response.json();
+  const rawData: ScrapedItem[] = json.data;
+
+  // --- FILTERING LOGIC ---
+  
+  // A. Get only Playable Videos (Iframes, MP4s)
+  const videos = rawData.filter(item => item.type === 'video');
+  
+  // B. Get Content Cards (Episodes, Search Results)
+  const episodes = rawData.filter(item => item.type === 'card');
+
+  console.log(\`Found \${videos.length} videos and \${episodes.length} episodes.\`);
+  return { videos, episodes };
 }
   `.trim();
 
@@ -34,11 +51,11 @@ async function fetchAnimeData() {
   };
 
   return (
-    <div className="mt-12 bg-slate-900 rounded-xl border border-slate-700 overflow-hidden">
+    <div className="mt-12 bg-slate-900 rounded-xl border border-slate-700 overflow-hidden mb-20">
       <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700 bg-slate-950">
         <div className="flex items-center gap-2">
           <Terminal size={18} className="text-blue-500" />
-          <h2 className="font-semibold text-slate-200">Public API Endpoint</h2>
+          <h2 className="font-semibold text-slate-200">Frontend Integration Guide</h2>
         </div>
         <button 
           onClick={handleCopy}
@@ -49,19 +66,39 @@ async function fetchAnimeData() {
         </button>
       </div>
       
-      <div className="p-6">
-        <p className="text-slate-400 mb-4 text-sm">
-          This application exposes a public REST API. You can use the endpoint below to fetch anime/movie data from external applications.
-          <br/>
-          <span className="text-green-400 text-xs font-mono mt-1 block">Status: Production Ready • CORS Enabled (Access-Control-Allow-Origin: *)</span>
-        </p>
-        
-        <div className="grid grid-cols-1 gap-6">
-          <div>
-            <pre className="font-mono text-xs bg-slate-950 p-4 rounded-lg overflow-x-auto text-blue-100 border border-slate-800">
-              <code>{exampleCode}</code>
-            </pre>
-          </div>
+      <div className="p-6 space-y-6">
+        <div className="flex items-start gap-4">
+           <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400 mt-1">
+             <Filter size={20} />
+           </div>
+           <div>
+             <h3 className="text-lg font-medium text-white mb-2">How to Filter Data</h3>
+             <p className="text-slate-400 text-sm leading-relaxed">
+               This API acts as a <strong>raw courier</strong>. It retrieves EVERYTHING found on the page. 
+               Your frontend application must filter the data based on the <code>type</code> property:
+             </p>
+             <ul className="mt-3 space-y-2 text-sm text-slate-300">
+               <li className="flex items-center gap-2">
+                 <span className="px-2 py-0.5 rounded bg-red-900/50 text-red-300 text-xs border border-red-800">video</span>
+                 Direct video players, iframe embeds, or MP4 links.
+               </li>
+               <li className="flex items-center gap-2">
+                 <span className="px-2 py-0.5 rounded bg-blue-900/50 text-blue-300 text-xs border border-blue-800">card</span>
+                 Anime episodes, movie posters, or search result items.
+               </li>
+               <li className="flex items-center gap-2">
+                 <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-xs border border-slate-700">link</span>
+                 Page metadata or generic links.
+               </li>
+             </ul>
+           </div>
+        </div>
+
+        <div className="relative group">
+          <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg opacity-20 group-hover:opacity-30 transition duration-1000"></div>
+          <pre className="relative font-mono text-xs bg-slate-950 p-4 rounded-lg overflow-x-auto text-blue-100 border border-slate-800 scrollbar-thin scrollbar-thumb-slate-700">
+            <code>{exampleCode}</code>
+          </pre>
         </div>
       </div>
     </div>
