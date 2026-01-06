@@ -1,5 +1,5 @@
 {
   "name": "Anime & Movie API Scraper",
-  "description": "An intelligent data extraction interface that uses Gemini Search Grounding to scrape real-time data from Kuramanime, Samehadaku, and Moviebox.",
+  "description": "An intelligent data extraction interface to scrape real-time data from Kuramanime, Samehadaku, and Moviebox.",
   "requestFramePermissions": []
 }

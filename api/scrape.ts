@@ -1,9 +1,5 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import * as cheerio from 'cheerio';
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-// Standard Node.js Serverless Handler for Vercel
 export default async function handler(req: any, res: any) {
   // 1. Setup CORS
   res.setHeader('Access-Control-Allow-Origin', '*'); 
@@ -21,141 +17,167 @@ export default async function handler(req: any, res: any) {
 
   try {
     const { siteUrl } = req.body || {};
-
     if (!siteUrl) {
       return res.status(400).json({ error: 'siteUrl is required.' });
     }
 
-    const isYoutube = siteUrl.includes('youtube.com') || siteUrl.includes('youtu.be');
+    // Headers to mimic a real browser to avoid some basic bot detection
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.5',
+      'Referer': 'https://www.google.com/'
+    };
 
-    // 2. Robust Prompt Engineering
-    let prompt = '';
-
-    if (isYoutube) {
-      prompt = `
-        You are an API that extracts video metadata.
-        Use Google Search to find information about this YouTube link: ${siteUrl}
-        
-        Task:
-        1. Identify if it is a single video, a playlist, or a channel.
-        2. Extract the video details found.
-        3. If it is a playlist or channel, list the 6 most recent/relevant videos.
-        
-        Strictly return a raw JSON Array. Do not use Markdown formatting.
-      `;
-    } else {
-      prompt = `
-        You are an API that extracts anime/movie metadata.
-        Use Google Search to find the **latest updated anime episodes or movies** currently listed on ${siteUrl}.
-        
-        Query to run: "site:${siteUrl} latest episodes" or "site:${siteUrl} new releases".
-        
-        Strictly return a raw JSON Array of the top 8 items. Do not use Markdown formatting.
-      `;
+    const response = await fetch(siteUrl, { headers });
+    
+    if (!response.ok) {
+      // Handle 403 Forbidden (Cloudflare) or other errors
+      if (response.status === 403) {
+        throw new Error("Access Denied (403). The site is protecting against automated access.");
+      }
+      throw new Error(`Failed to fetch site: ${response.statusText}`);
     }
 
-    // 3. Call Gemini (Using gemini-2.0-flash-exp for best Search/JSON performance)
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp', 
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        responseMimeType: "application/json",
-        safetySettings: [
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
-        ],
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              url: { type: Type.STRING },
-              quality: { type: Type.STRING },
-              image: { type: Type.STRING, nullable: true },
-              videoUrl: { type: Type.STRING, nullable: true },
-              embedUrl: { type: Type.STRING, nullable: true }
-            },
-            required: ['title', 'url']
-          }
+    const html = await response.text();
+    const $ = cheerio.load(html);
+    let scrapedData: any[] = [];
+
+    // --- STRATEGY: Domain Specific Parsing ---
+
+    if (siteUrl.includes('youtube.com') || siteUrl.includes('youtu.be')) {
+      // YouTube Scraping (Parsing meta tags and initial data)
+      // 1. Single Video Metadata
+      const title = $('meta[name="title"]').attr('content') || $('title').text();
+      const description = $('meta[name="description"]').attr('content');
+      const image = $('meta[property="og:image"]').attr('content');
+      const url = $('link[rel="canonical"]').attr('href') || siteUrl;
+      const isVideo = siteUrl.includes('/watch');
+
+      if (isVideo) {
+        // Single Video Result
+        const videoId = url.split('v=')[1]?.split('&')[0] || url.split('youtu.be/')[1];
+        scrapedData.push({
+          title: title.replace(' - YouTube', ''),
+          url: url,
+          image: image,
+          quality: 'HD',
+          videoUrl: url,
+          embedUrl: videoId ? `https://www.youtube.com/embed/${videoId}` : null,
+          source: 'YouTube'
+        });
+      }
+      
+      // 2. Playlist/Channel Attempts (Simple extraction from scripts/html)
+      // Note: YouTube obfuscates classes. We look for patterns in scripts or reliable meta tags.
+      // This is limited without an API key or heavy Puppeteer usage.
+    } 
+    else if (siteUrl.includes('kuramanime')) {
+      // Kuramanime Logic
+      // Usually grid items. Selectors might need adjustment if site theme changes.
+      $('.product__item, .anime-card, article').each((i, el) => {
+        if (i > 11) return; // Limit to 12
+        const title = $(el).find('h4, h3, .title').text().trim();
+        const link = $(el).find('a').attr('href');
+        const img = $(el).find('img').attr('data-setbg') || $(el).find('img').attr('src');
+        const ep = $(el).find('.ep').text().trim();
+        
+        if (title && link) {
+          scrapedData.push({
+            title,
+            url: link.startsWith('http') ? link : new URL(link, siteUrl).href,
+            image: img,
+            quality: ep || 'Sub',
+            source: 'Kuramanime'
+          });
         }
-      }
-    });
+      });
+    } 
+    else if (siteUrl.includes('samehadaku')) {
+      // Samehadaku Logic
+      $('.post-show ul li, .animepost, article').each((i, el) => {
+        if (i > 11) return;
+        const title = $(el).find('.entry-title, .title').text().trim();
+        const link = $(el).find('a').attr('href');
+        const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src');
+        const ep = $(el).find('.dtla .ep, .episode').text().trim();
 
-    // 4. Robust JSON Parsing (Regex Extraction)
-    let jsonText = response.text || "[]";
-    
-    // Logic: Find the first '[' and the last ']' to ignore any conversational filler text
-    const jsonMatch = jsonText.match(/\[.*\]/s);
-    if (jsonMatch) {
-        jsonText = jsonMatch[0];
+        if (title && link) {
+          scrapedData.push({
+            title,
+            url: link,
+            image: img,
+            quality: ep || 'Sub',
+            source: 'Samehadaku'
+          });
+        }
+      });
+    }
+    else {
+      // --- GENERIC FALLBACK (MovieBox etc) ---
+      // Look for common "card" patterns: An <a> tag containing an <img> and some text
+      $('a').each((i, el) => {
+        if (scrapedData.length >= 12) return;
+        
+        const link = $(el).attr('href');
+        if (!link || link === '#' || link === '/') return;
+
+        const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src');
+        // Find title text either inside the anchor or in a sibling/child container
+        let title = $(el).find('h1, h2, h3, h4, .title, .caption').text().trim();
+        if (!title) title = $(el).text().trim();
+
+        // Heuristic: If it has an image and title and link, it's likely a content card
+        if (img && title && title.length > 3 && title.length < 100 && !img.includes('logo') && !img.includes('icon')) {
+           // Avoid duplicate URLs
+           if (!scrapedData.find(item => item.url === link)) {
+             scrapedData.push({
+               title,
+               url: link.startsWith('http') ? link : new URL(link, siteUrl).href,
+               image: img.startsWith('http') ? img : new URL(img, siteUrl).href,
+               quality: 'N/A',
+               source: new URL(siteUrl).hostname
+             });
+           }
+        }
+      });
     }
 
-    let parsedData = [];
-    try {
-      parsedData = JSON.parse(jsonText);
-    } catch (e) {
-      console.error("JSON Parsing Failed. Raw Text:", jsonText);
-      // Fallback: try to parse as single object if array fails
-      if (jsonText.trim().startsWith('{')) {
-         try { parsedData = [JSON.parse(jsonText)]; } catch(err) {}
+    // Clean up data
+    const finalData = scrapedData.map(item => ({
+      ...item,
+      image: item.image || 'https://placehold.co/600x400/1e293b/475569?text=No+Image',
+      uploadedAt: new Date().toISOString()
+    }));
+
+    if (finalData.length === 0) {
+      // If parsing specific logic failed, try extracting OpenGraph data as a last resort (for single pages)
+      const ogTitle = $('meta[property="og:title"]').attr('content');
+      const ogUrl = $('meta[property="og:url"]').attr('content');
+      const ogImage = $('meta[property="og:image"]').attr('content');
+      
+      if (ogTitle && ogUrl) {
+         finalData.push({
+            title: ogTitle,
+            url: ogUrl,
+            image: ogImage,
+            quality: 'Page',
+            source: new URL(siteUrl).hostname,
+            uploadedAt: new Date().toISOString()
+         });
+      } else {
+        throw new Error("Could not detect any video or episode content on this page. The site structure may have changed.");
       }
-    }
-    
-    // 5. Data Post-Processing
-    const cleanedData = Array.isArray(parsedData) ? parsedData.map((item: any) => {
-      let finalEmbedUrl = item.embedUrl;
-      let finalImage = item.image;
-      const isYT = item.url?.includes('youtube.com') || item.url?.includes('youtu.be');
-
-      // Enhanced YouTube Processing
-      if (isYT && item.url) {
-        try {
-          let videoId = null;
-          // Extract ID from v= or direct path
-          if (item.url.includes('v=')) {
-            videoId = item.url.split('v=')[1]?.split('&')[0];
-          } else if (item.url.includes('youtu.be/')) {
-            videoId = item.url.split('youtu.be/')[1]?.split('?')[0];
-          }
-
-          if (videoId) {
-            finalEmbedUrl = `https://www.youtube.com/embed/${videoId}`;
-            // Force high quality thumbnail for YouTube if generic image returned
-            if (!finalImage || !finalImage.includes('ytimg')) {
-              finalImage = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-            }
-          }
-        } catch (e) {}
-      }
-
-      return {
-        title: item.title || "Unknown Title",
-        url: item.url || siteUrl,
-        quality: item.quality || 'HD',
-        image: finalImage || 'https://placehold.co/600x400/1e293b/475569?text=No+Image',
-        videoUrl: isYT ? item.url : null,
-        embedUrl: finalEmbedUrl || null,
-        source: isYT ? 'YouTube' : new URL(siteUrl).hostname,
-        uploadedAt: new Date().toISOString()
-      };
-    }) : [];
-
-    if (cleanedData.length === 0) {
-       console.warn("No data extracted.");
     }
 
     return res.status(200).json({ 
       success: true, 
-      data: cleanedData,
+      data: finalData,
       timestamp: new Date().toISOString()
     });
 
   } catch (error: any) {
-    console.error("API Critical Error:", error);
+    console.error("Scraper Error:", error);
     return res.status(500).json({ 
       success: false, 
       error: error.message || "Internal Server Error" 

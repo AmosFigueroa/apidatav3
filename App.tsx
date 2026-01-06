@@ -59,7 +59,7 @@ const App: React.FC = () => {
             <div className="flex items-center gap-4">
                <span className="hidden md:flex items-center gap-2 text-xs text-green-400 bg-green-900/20 px-3 py-1 rounded-full border border-green-900/50">
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  System Operational
+                  Direct Mode
                </span>
             </div>
           </div>
@@ -73,7 +73,7 @@ const App: React.FC = () => {
             Universal Data Extractor
           </h1>
           <p className="text-slate-400 max-w-2xl mx-auto text-lg">
-            Extract real-time data from Anime sites, Movie portals, or YouTube Channels & Playlists using Gemini AI.
+            Directly scrape real-time data from Anime sites, Movie portals, or YouTube Videos.
           </p>
         </div>
 
@@ -92,7 +92,7 @@ const App: React.FC = () => {
                   type="text"
                   value={customUrl}
                   onChange={(e) => setCustomUrl(e.target.value)}
-                  placeholder="Paste URL (e.g., https://youtube.com/@ChannelName or https://v9.kuramanime.tel/)"
+                  placeholder="Paste URL (e.g., https://youtube.com/watch?v=... or https://samehadaku.care/)"
                   className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-white placeholder-slate-600 transition-all"
                 />
               </div>
@@ -174,6 +174,11 @@ const App: React.FC = () => {
               <div>
                 <h3 className="font-bold">Extraction Failed</h3>
                 <p>{error}</p>
+                {error.includes('403') && (
+                  <p className="text-xs mt-2 text-red-300 opacity-80">
+                    Note: Some sites block cloud servers (AWS/Vercel). Try a YouTube link or a less protected site.
+                  </p>
+                )}
               </div>
             </div>
           )}
