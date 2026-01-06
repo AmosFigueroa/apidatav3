@@ -7,6 +7,7 @@ export interface ScrapedItem {
   embedUrl?: string; // Iframe embed source
   uploadedAt?: string;
   source: string;
+  type: 'video' | 'card' | 'link'; // New field for filtering
 }
 
 export enum TargetSite {

@@ -21,18 +21,16 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'siteUrl is required.' });
     }
 
-    // Headers to mimic a real browser to avoid some basic bot detection
+    // Headers to mimic a real browser
     const headers = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.5',
-      'Referer': 'https://www.google.com/'
+      'Referer': siteUrl
     };
 
     const response = await fetch(siteUrl, { headers });
     
     if (!response.ok) {
-      // Handle 403 Forbidden (Cloudflare) or other errors
       if (response.status === 403) {
         throw new Error("Access Denied (403). The site is protecting against automated access.");
       }
@@ -42,42 +40,88 @@ export default async function handler(req: any, res: any) {
     const html = await response.text();
     const $ = cheerio.load(html);
     let scrapedData: any[] = [];
+    const siteDomain = new URL(siteUrl).hostname;
 
-    // --- STRATEGY: Domain Specific Parsing ---
-
-    if (siteUrl.includes('youtube.com') || siteUrl.includes('youtu.be')) {
-      // YouTube Scraping (Parsing meta tags and initial data)
-      // 1. Single Video Metadata
-      const title = $('meta[name="title"]').attr('content') || $('title').text();
-      const description = $('meta[name="description"]').attr('content');
-      const image = $('meta[property="og:image"]').attr('content');
-      const url = $('link[rel="canonical"]').attr('href') || siteUrl;
-      const isVideo = siteUrl.includes('/watch');
-
-      if (isVideo) {
-        // Single Video Result
-        const videoId = url.split('v=')[1]?.split('&')[0] || url.split('youtu.be/')[1];
+    // --- PHASE 1: DIRECT MEDIA EXTRACTION (Embedded Videos) ---
+    // Extract ANY iframe or video tag found on the page (Greedy)
+    $('iframe').each((i, el) => {
+      const src = $(el).attr('src') || $(el).attr('data-src');
+      if (src && !src.includes('facebook') && !src.includes('google') && !src.includes('analytics')) {
         scrapedData.push({
-          title: title.replace(' - YouTube', ''),
-          url: url,
-          image: image,
-          quality: 'HD',
-          videoUrl: url,
-          embedUrl: videoId ? `https://www.youtube.com/embed/${videoId}` : null,
-          source: 'YouTube'
+          title: `Embedded Video ${i + 1}`,
+          url: src.startsWith('http') ? src : new URL(src, siteUrl).href,
+          image: '',
+          quality: 'Embed',
+          embedUrl: src.startsWith('http') ? src : new URL(src, siteUrl).href,
+          source: siteDomain,
+          type: 'video'
         });
       }
+    });
+
+    $('video').each((i, el) => {
+      const src = $(el).attr('src') || $(el).find('source').attr('src');
+      const poster = $(el).attr('poster');
+      if (src) {
+        scrapedData.push({
+          title: `Direct Video Player ${i + 1}`,
+          url: src.startsWith('http') ? src : new URL(src, siteUrl).href,
+          image: poster ? (poster.startsWith('http') ? poster : new URL(poster, siteUrl).href) : '',
+          quality: 'Direct',
+          videoUrl: src.startsWith('http') ? src : new URL(src, siteUrl).href,
+          source: siteDomain,
+          type: 'video'
+        });
+      }
+    });
+
+    // --- PHASE 2: CONTENT LIST EXTRACTION (Cards/Items) ---
+    // No limits (remove i > 11 checks). Take everything.
+
+    if (siteUrl.includes('youtube.com') || siteUrl.includes('youtu.be')) {
+      // YouTube Logic
+      const title = $('meta[name="title"]').attr('content') || $('title').text();
+      const image = $('meta[property="og:image"]').attr('content');
+      const url = $('link[rel="canonical"]').attr('href') || siteUrl;
       
-      // 2. Playlist/Channel Attempts (Simple extraction from scripts/html)
-      // Note: YouTube obfuscates classes. We look for patterns in scripts or reliable meta tags.
-      // This is limited without an API key or heavy Puppeteer usage.
+      // Push main video metadata
+      scrapedData.push({
+        title: title.replace(' - YouTube', ''),
+        url: url,
+        image: image,
+        quality: 'HD',
+        videoUrl: url,
+        source: 'YouTube',
+        type: 'video' // It's the main video
+      });
+
+      // Try to find "Up Next" or Playlist items (Static HTML scan)
+      // YouTube static HTML often contains "compactVideoRenderer" inside scripts, but simpler 
+      // is scanning for 'a' tags with specific classes if available, or just generic video links
+      $('a').each((i, el) => {
+        const href = $(el).attr('href');
+        const vidTitle = $(el).attr('title') || $(el).find('#video-title').text().trim() || $(el).find('h3').text().trim();
+        
+        if (href && href.includes('/watch?v=') && vidTitle) {
+          const fullUrl = `https://www.youtube.com${href}`;
+          // Avoid duplicates with main video
+          if (fullUrl !== url) {
+             scrapedData.push({
+               title: vidTitle,
+               url: fullUrl,
+               image: `https://i.ytimg.com/vi/${href.split('v=')[1]?.split('&')[0]}/mqdefault.jpg`,
+               quality: 'Rel',
+               source: 'YouTube',
+               type: 'card' // These are links to other videos
+             });
+          }
+        }
+      });
     } 
     else if (siteUrl.includes('kuramanime')) {
-      // Kuramanime Logic
-      // Usually grid items. Selectors might need adjustment if site theme changes.
-      $('.product__item, .anime-card, article').each((i, el) => {
-        if (i > 11) return; // Limit to 12
-        const title = $(el).find('h4, h3, .title').text().trim();
+      // Select ALL items, not just the first 12
+      $('.product__item, .anime-card, article, .sidebar-comment').each((i, el) => {
+        const title = $(el).find('h4, h3, .title, h5').text().trim();
         const link = $(el).find('a').attr('href');
         const img = $(el).find('img').attr('data-setbg') || $(el).find('img').attr('src');
         const ep = $(el).find('.ep').text().trim();
@@ -88,16 +132,16 @@ export default async function handler(req: any, res: any) {
             url: link.startsWith('http') ? link : new URL(link, siteUrl).href,
             image: img,
             quality: ep || 'Sub',
-            source: 'Kuramanime'
+            source: 'Kuramanime',
+            type: 'card'
           });
         }
       });
     } 
     else if (siteUrl.includes('samehadaku')) {
-      // Samehadaku Logic
-      $('.post-show ul li, .animepost, article').each((i, el) => {
-        if (i > 11) return;
-        const title = $(el).find('.entry-title, .title').text().trim();
+      // Samehadaku: Get Home page items AND Widget items
+      $('.post-show ul li, .animepost, article, .widget-post li').each((i, el) => {
+        const title = $(el).find('.entry-title, .title, a').first().text().trim();
         const link = $(el).find('a').attr('href');
         const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src');
         const ep = $(el).find('.dtla .ep, .episode').text().trim();
@@ -108,35 +152,50 @@ export default async function handler(req: any, res: any) {
             url: link,
             image: img,
             quality: ep || 'Sub',
-            source: 'Samehadaku'
+            source: 'Samehadaku',
+            type: 'card'
           });
         }
       });
     }
     else {
-      // --- GENERIC FALLBACK (MovieBox etc) ---
-      // Look for common "card" patterns: An <a> tag containing an <img> and some text
+      // --- GENERIC GREEDY FALLBACK ---
+      // 1. Find anything that looks like a video link (.mp4, .mkv)
+      $('a[href$=".mp4"], a[href$=".mkv"], a[href$=".m3u8"]').each((i, el) => {
+         scrapedData.push({
+            title: $(el).text().trim() || "Direct Video Link",
+            url: $(el).attr('href') || "",
+            image: '',
+            quality: 'File',
+            videoUrl: $(el).attr('href'),
+            source: siteDomain,
+            type: 'video'
+         });
+      });
+
+      // 2. Find anything that looks like a card (Link with Image)
       $('a').each((i, el) => {
-        if (scrapedData.length >= 12) return;
-        
         const link = $(el).attr('href');
-        if (!link || link === '#' || link === '/') return;
+        if (!link || link === '#' || link === '/' || link.startsWith('javascript')) return;
 
         const img = $(el).find('img').attr('src') || $(el).find('img').attr('data-src');
-        // Find title text either inside the anchor or in a sibling/child container
-        let title = $(el).find('h1, h2, h3, h4, .title, .caption').text().trim();
+        let title = $(el).find('h1, h2, h3, h4, .title, .caption, strong').text().trim();
+        if (!title) title = $(el).attr('title') || "";
         if (!title) title = $(el).text().trim();
 
-        // Heuristic: If it has an image and title and link, it's likely a content card
-        if (img && title && title.length > 3 && title.length < 100 && !img.includes('logo') && !img.includes('icon')) {
-           // Avoid duplicate URLs
-           if (!scrapedData.find(item => item.url === link)) {
+        // Relaxed Filtering: Just needs a Title, a Link, and an Image to be considered a "Card"
+        if (img && title && title.length > 2 && !img.includes('logo') && !img.includes('icon')) {
+           const fullUrl = link.startsWith('http') ? link : new URL(link, siteUrl).href;
+           
+           // Simple duplicate check
+           if (!scrapedData.find(item => item.url === fullUrl)) {
              scrapedData.push({
                title,
-               url: link.startsWith('http') ? link : new URL(link, siteUrl).href,
+               url: fullUrl,
                image: img.startsWith('http') ? img : new URL(img, siteUrl).href,
-               quality: 'N/A',
-               source: new URL(siteUrl).hostname
+               quality: 'Item',
+               source: siteDomain,
+               type: 'card'
              });
            }
         }
@@ -151,27 +210,25 @@ export default async function handler(req: any, res: any) {
     }));
 
     if (finalData.length === 0) {
-      // If parsing specific logic failed, try extracting OpenGraph data as a last resort (for single pages)
+      // Last resort: Return Page Metadata if nothing else found
       const ogTitle = $('meta[property="og:title"]').attr('content');
       const ogUrl = $('meta[property="og:url"]').attr('content');
-      const ogImage = $('meta[property="og:image"]').attr('content');
-      
-      if (ogTitle && ogUrl) {
+      if (ogTitle) {
          finalData.push({
             title: ogTitle,
-            url: ogUrl,
-            image: ogImage,
+            url: ogUrl || siteUrl,
+            image: $('meta[property="og:image"]').attr('content'),
             quality: 'Page',
-            source: new URL(siteUrl).hostname,
-            uploadedAt: new Date().toISOString()
+            source: siteDomain,
+            type: 'link'
          });
-      } else {
-        throw new Error("Could not detect any video or episode content on this page. The site structure may have changed.");
       }
     }
 
+    // Return EVERYTHING. No slice. No filtering. The frontend decides.
     return res.status(200).json({ 
       success: true, 
+      count: finalData.length,
       data: finalData,
       timestamp: new Date().toISOString()
     });
