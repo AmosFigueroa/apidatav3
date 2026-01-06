@@ -1,40 +1,35 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Initialize Gemini Client (Server-side only)
+// Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-export default async function handler(request: Request) {
-  // CORS Headers to allow other websites to use this API
-  const headers = {
-    'Access-Control-Allow-Origin': '*', // Allows access from any website
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json'
-  };
+// Standard Node.js Serverless Handler for Vercel
+export default async function handler(req: any, res: any) {
+  // 1. Setup CORS (Crucial for external access)
+  res.setHeader('Access-Control-Allow-Origin', '*'); // Allow any website to call this
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Content-Type', 'application/json');
 
-  // Handle preflight requests (OPTIONS)
-  if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers });
+  // 2. Handle Preflight Requests (OPTIONS)
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
   }
 
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { 
-      status: 405, 
-      headers 
-    });
+  // 3. Validate Method
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed. Use POST.' });
   }
 
   try {
-    const body = await request.json();
-    const siteUrl = body.siteUrl;
+    // Vercel automatically parses JSON body if Content-Type is application/json
+    const { siteUrl } = req.body || {};
 
     if (!siteUrl) {
-      return new Response(JSON.stringify({ error: 'siteUrl is required' }), { 
-        status: 400, 
-        headers 
-      });
+      return res.status(400).json({ error: 'siteUrl is required in the request body.' });
     }
 
+    // 4. Gemini Scraper Logic
     const prompt = `
       Access the website ${siteUrl} using Google Search.
       Find the absolute latest updated anime episodes or movies listed on the homepage or latest updates section.
@@ -80,7 +75,7 @@ export default async function handler(request: Request) {
       parsedData = JSON.parse(jsonText);
     }
     
-    // Normalize data
+    // 5. Data Normalization
     const cleanedData = parsedData.map((item: any) => ({
       title: item.title,
       url: item.url || siteUrl,
@@ -92,23 +87,18 @@ export default async function handler(request: Request) {
       uploadedAt: new Date().toISOString()
     }));
 
-    return new Response(JSON.stringify({ 
+    // 6. Return Success Response
+    return res.status(200).json({ 
       success: true, 
       data: cleanedData,
       timestamp: new Date().toISOString()
-    }), { 
-      status: 200, 
-      headers 
     });
 
   } catch (error: any) {
     console.error("API Error:", error);
-    return new Response(JSON.stringify({ 
+    return res.status(500).json({ 
       success: false, 
       error: error.message || "Internal Server Error" 
-    }), { 
-      status: 500, 
-      headers 
     });
   }
 }
