@@ -10,22 +10,35 @@ export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed. Use POST.' });
 
   try {
-    const { siteUrl } = req.body || {};
+    let { siteUrl } = req.body || {};
     if (!siteUrl) return res.status(400).json({ error: 'siteUrl is required.' });
 
-    // Headers tailored for video streaming sites
+    // --- REGION BYPASS LOGIC (INDONESIA) ---
+    // Specifically for Muse Indonesia, Ani-One, etc.
+    // We force YouTube to think the user prefers the Indonesian content catalog.
+    if (siteUrl.includes('youtube.com') || siteUrl.includes('youtu.be')) {
+      const urlObj = new URL(siteUrl);
+      // 'gl=ID' = Geo Location Indonesia
+      // 'hl=id' = Host Language Indonesia
+      urlObj.searchParams.set('gl', 'ID');
+      urlObj.searchParams.set('hl', 'id');
+      siteUrl = urlObj.toString();
+    }
+
+    // Headers tailored to look like a Chrome browser in Indonesia
     const headers = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
-      'Referer': siteUrl
+      'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7', // PENTING: Minta konten bahasa Indonesia
+      'Referer': 'https://www.google.co.id/', // PENTING: Pura-pura datang dari Google Indonesia
+      'Cookie': 'GL=ID; HL=id; PREF=f6=40000000&gl=ID&hl=id;' // Force YouTube preferences via Cookie
     };
 
     const response = await fetch(siteUrl, { headers });
-    if (!response.ok && response.status !== 403) throw new Error(`HTTP Error: ${response.status}`);
     
-    // Cloudflare check
+    // Cloudflare / Bot Protection checks
     if (response.status === 403) throw new Error("BLOCKED: Site has anti-bot protection. Try using a proxy or check if the site allows scraping.");
+    if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
 
     const html = await response.text();
     const $ = cheerio.load(html);
@@ -62,11 +75,11 @@ export default async function handler(req: any, res: any) {
           // Paths vary based on page type (Home vs Videos tab)
           const tabs = ytData.contents?.twoColumnBrowseResultsRenderer?.tabs;
           if (tabs) {
-            // Usually the second tab is 'Videos' if on channel home, or first if on /videos
             let contentItems = [];
             
-            // Try to find the tab that has 'richGridRenderer' or 'sectionListRenderer'
+            // Try to find the tab that has 'richGridRenderer' (Videos tab) or 'sectionListRenderer' (Home tab)
             tabs.forEach((tab: any) => {
+               // Strategy A: Rich Grid (The "Videos" tab layout)
                const richGrid = tab?.tabRenderer?.content?.richGridRenderer;
                if (richGrid) {
                  richGrid.contents?.forEach((c: any) => {
@@ -75,22 +88,43 @@ export default async function handler(req: any, res: any) {
                    }
                  });
                }
+
+               // Strategy B: Item Section (The "Home" tab layout)
+               const sectionList = tab?.tabRenderer?.content?.sectionListRenderer;
+               if (sectionList) {
+                  sectionList.contents?.forEach((section: any) => {
+                     const items = section?.itemSectionRenderer?.contents;
+                     if (items) {
+                        items.forEach((item: any) => {
+                           if (item.gridVideoRenderer) contentItems.push(item.gridVideoRenderer);
+                           if (item.videoRenderer) contentItems.push(item.videoRenderer);
+                           // Shelf renderer (horizontal lists)
+                           if (item.shelfRenderer) {
+                              item.shelfRenderer.content?.horizontalListRenderer?.items?.forEach((hItem: any) => {
+                                 if (hItem.gridVideoRenderer) contentItems.push(hItem.gridVideoRenderer);
+                              });
+                           }
+                        });
+                     }
+                  });
+               }
             });
 
             contentItems.forEach((v: any) => {
                const videoId = v.videoId;
+               // Get title from runs or simpleText
                const title = v.title?.runs?.[0]?.text || v.title?.simpleText;
-               const thumb = v.thumbnail?.thumbnails?.[0]?.url; // use smallest or largest
-               const viewCount = v.viewCountText?.simpleText;
+               
+               // View count handling
+               const viewCount = v.viewCountText?.simpleText || v.shortViewCountText?.simpleText || 'New';
                
                if (videoId && title) {
-                 // Get higher res thumbnail
                  const highResThumb = `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
                  scrapedData.push({
                    title: title,
                    url: `https://www.youtube.com/watch?v=${videoId}`,
                    image: highResThumb,
-                   quality: viewCount || 'YT',
+                   quality: viewCount,
                    source: 'YouTube Channel',
                    type: 'card'
                  });
@@ -132,7 +166,6 @@ export default async function handler(req: any, res: any) {
           try {
             const json = JSON.parse(script);
             // Attempt to find list in typical Next.js props structure (highly variable)
-            // This is a "Best Effort" attempt
             const queries = json.props?.pageProps?.dehydratedState?.queries;
             if (Array.isArray(queries)) {
                queries.forEach((q: any) => {
@@ -157,25 +190,7 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    // --- 3. OTHER DISTRIBUTORS (Kuramanime/Samehadaku) ---
-    else if (siteUrl.includes('kuramanime')) {
-      $('.product__item, .anime-card').each((i, el) => {
-        const title = $(el).find('h5 a, .title').text().trim();
-        const link = $(el).find('a').attr('href');
-        const img = $(el).find('.product__item__pic').attr('data-setbg') || $(el).find('img').attr('src');
-        if (title && link) scrapedData.push({ title, url: link, image: img, quality: 'Sub', source: 'Kuramanime', type: 'card' });
-      });
-    }
-    else if (siteUrl.includes('samehadaku')) {
-      $('.post-show ul li, article').each((i, el) => {
-        const title = $(el).find('.entry-title').text().trim();
-        const link = $(el).find('a').attr('href');
-        const img = $(el).find('img').attr('src');
-        if (title && link) scrapedData.push({ title, url: link, image: img, quality: 'Sub', source: 'Samehadaku', type: 'card' });
-      });
-    }
-
-    // --- 4. UNIVERSAL FALLBACK (Greedy) ---
+    // --- 3. UNIVERSAL FALLBACK (Greedy) ---
     // Runs if nothing specific was found
     if (scrapedData.length === 0) {
       $('a').each((i, el) => {
