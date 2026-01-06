@@ -35,20 +35,20 @@ export default async function handler(req: any, res: any) {
 
     if (isYoutube) {
       prompt = `
-        Access the YouTube URL: ${siteUrl} using Google Search.
-        Determine if this is a Channel, a Playlist, or a Single Video.
+        Access the provided YouTube URL: ${siteUrl} using Google Search.
+        
+        Task:
+        1. Identify if the URL is a specific **Video**, a **Channel**, or a **Playlist**.
+        2. **If Channel**: Navigate to the "Videos" section/tab and retrieve the 8 most recent video uploads.
+        3. **If Playlist**: Retrieve the first 8 videos listed in the playlist.
+        4. **If Single Video**: Retrieve details for just that video.
 
-        1. **If it is a Channel**: List the 8 most recent videos uploaded.
-        2. **If it is a Playlist**: List the first 8 videos in the playlist.
-        3. **If it is a Single Video**: Extract details for just that video.
-
-        Extract strictly:
-        - **Title**: Video title.
-        - **URL**: Full YouTube watch URL (e.g. https://www.youtube.com/watch?v=ID).
-        - **Quality**: If available, put "4K", "HD", or the duration (e.g. "10:05").
-        - **Image**: The high-res thumbnail URL.
-        - **Embed URL**: Construct the embed link (https://www.youtube.com/embed/VIDEO_ID).
-
+        Extract strictly for each video found:
+        - **title**: Video title.
+        - **url**: Full YouTube watch URL (e.g. https://www.youtube.com/watch?v=ID).
+        - **quality**: The video duration (e.g. "10:05") OR quality label (e.g. "4K", "HD").
+        - **image**: The thumbnail URL.
+        
         Return purely JSON data.
       `;
     } else {
@@ -95,20 +95,53 @@ export default async function handler(req: any, res: any) {
     let parsedData = [];
     
     if (jsonText) {
-      parsedData = JSON.parse(jsonText);
+      try {
+        parsedData = JSON.parse(jsonText);
+      } catch (e) {
+        console.error("JSON Parse Error", e);
+      }
     }
     
-    // 5. Data Normalization
-    const cleanedData = parsedData.map((item: any) => ({
-      title: item.title,
-      url: item.url || siteUrl,
-      quality: item.quality || 'HD',
-      image: item.image || `https://i.ytimg.com/vi/default/hqdefault.jpg`,
-      videoUrl: item.videoUrl || item.url, // For YT, videoUrl is often just the watch link
-      embedUrl: item.embedUrl || null,
-      source: isYoutube ? 'YouTube' : siteUrl,
-      uploadedAt: new Date().toISOString()
-    }));
+    // 5. Data Normalization & YouTube Post-Processing
+    const cleanedData = parsedData.map((item: any) => {
+      let finalEmbedUrl = item.embedUrl;
+      let finalImage = item.image;
+      
+      // Post-processing for YouTube to ensure valid Embeds and Images
+      if (isYoutube && item.url) {
+        try {
+          // Robust ID extraction for various YT URL formats
+          let videoId = null;
+          if (item.url.includes('v=')) {
+            videoId = item.url.split('v=')[1]?.split('&')[0];
+          } else if (item.url.includes('youtu.be/')) {
+            videoId = item.url.split('youtu.be/')[1]?.split('?')[0];
+          }
+
+          if (videoId) {
+            // Force construct the embed URL for reliability
+            finalEmbedUrl = `https://www.youtube.com/embed/${videoId}`;
+            // If image is missing or default, use high-res YT thumb
+            if (!finalImage || finalImage.includes('default.jpg')) {
+              finalImage = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
+            }
+          }
+        } catch (e) {
+          // Fallback to original data if parsing fails
+        }
+      }
+
+      return {
+        title: item.title || "Untitled",
+        url: item.url || siteUrl,
+        quality: item.quality || 'HD',
+        image: finalImage || `https://i.ytimg.com/vi/default/hqdefault.jpg`,
+        videoUrl: item.videoUrl || item.url, // For YT, watch link is the videoUrl
+        embedUrl: finalEmbedUrl || null,
+        source: isYoutube ? 'YouTube' : siteUrl,
+        uploadedAt: new Date().toISOString()
+      };
+    });
 
     // 6. Return Success Response
     return res.status(200).json({ 
