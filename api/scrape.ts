@@ -33,41 +33,34 @@ export default async function handler(req: any, res: any) {
 
     if (isYoutube) {
       prompt = `
+        You are an API that extracts video metadata.
         Use Google Search to find information about this YouTube link: ${siteUrl}
         
-        If it's a Channel: List the 6 most recent videos.
-        If it's a Playlist: List the first 6 videos.
-        If it's a Video: Return details for that video.
-
-        For every video found, return:
-        - title: The video title.
-        - url: The YouTube watch URL.
-        - quality: Duration or 'HD'.
-        - image: Thumbnail URL.
+        Task:
+        1. Identify if it is a single video, a playlist, or a channel.
+        2. Extract the video details found.
+        3. If it is a playlist or channel, list the 6 most recent/relevant videos.
+        
+        Strictly return a raw JSON Array. Do not use Markdown formatting.
       `;
     } else {
       prompt = `
+        You are an API that extracts anime/movie metadata.
         Use Google Search to find the **latest updated anime episodes or movies** currently listed on ${siteUrl}.
         
-        Search specifically for query: "site:${siteUrl} latest episodes" or "site:${siteUrl} new releases".
+        Query to run: "site:${siteUrl} latest episodes" or "site:${siteUrl} new releases".
         
-        Return a list of the top 8 distinct items found.
-        For each item, strictly extract:
-        - title: The full title of the anime/movie (including Episode number).
-        - url: The link to the episode/movie page on the site.
-        - quality: The episode number (e.g. "Ep 12") or quality (e.g. "HD").
-        - image: A relevant thumbnail URL from the search result.
+        Strictly return a raw JSON Array of the top 8 items. Do not use Markdown formatting.
       `;
     }
 
-    // 3. Call Gemini with Safety Settings Disabled (Crucial for Anime content)
+    // 3. Call Gemini (Using gemini-2.0-flash-exp for best Search/JSON performance)
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-latest', // Using 2.5 Flash for better Search Grounding tool support
+      model: 'gemini-2.0-flash-exp', 
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
-        // Disable safety filters to prevent blocking anime/action content
         safetySettings: [
           { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
           { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
@@ -92,19 +85,22 @@ export default async function handler(req: any, res: any) {
       }
     });
 
-    // 4. Robust JSON Parsing (Fixing the "Extraction Failed" crash)
+    // 4. Robust JSON Parsing (Regex Extraction)
     let jsonText = response.text || "[]";
     
-    // Remove Markdown code fences if present (Gemini often adds these)
-    jsonText = jsonText.replace(/```json/g, '').replace(/```/g, '').trim();
+    // Logic: Find the first '[' and the last ']' to ignore any conversational filler text
+    const jsonMatch = jsonText.match(/\[.*\]/s);
+    if (jsonMatch) {
+        jsonText = jsonMatch[0];
+    }
 
     let parsedData = [];
     try {
       parsedData = JSON.parse(jsonText);
     } catch (e) {
       console.error("JSON Parsing Failed. Raw Text:", jsonText);
-      // Attempt to salvage if it's a single object instead of array
-      if (jsonText.startsWith('{')) {
+      // Fallback: try to parse as single object if array fails
+      if (jsonText.trim().startsWith('{')) {
          try { parsedData = [JSON.parse(jsonText)]; } catch(err) {}
       }
     }
@@ -119,6 +115,7 @@ export default async function handler(req: any, res: any) {
       if (isYT && item.url) {
         try {
           let videoId = null;
+          // Extract ID from v= or direct path
           if (item.url.includes('v=')) {
             videoId = item.url.split('v=')[1]?.split('&')[0];
           } else if (item.url.includes('youtu.be/')) {
@@ -127,8 +124,9 @@ export default async function handler(req: any, res: any) {
 
           if (videoId) {
             finalEmbedUrl = `https://www.youtube.com/embed/${videoId}`;
-            if (!finalImage || finalImage.includes('default')) {
-              finalImage = `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+            // Force high quality thumbnail for YouTube if generic image returned
+            if (!finalImage || !finalImage.includes('ytimg')) {
+              finalImage = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
             }
           }
         } catch (e) {}
@@ -137,9 +135,9 @@ export default async function handler(req: any, res: any) {
       return {
         title: item.title || "Unknown Title",
         url: item.url || siteUrl,
-        quality: item.quality || 'N/A',
+        quality: item.quality || 'HD',
         image: finalImage || 'https://placehold.co/600x400/1e293b/475569?text=No+Image',
-        videoUrl: isYT ? item.url : null, // Only return videoUrl if it's YouTube, others are unsafe/invalid usually
+        videoUrl: isYT ? item.url : null,
         embedUrl: finalEmbedUrl || null,
         source: isYT ? 'YouTube' : new URL(siteUrl).hostname,
         uploadedAt: new Date().toISOString()
@@ -147,7 +145,6 @@ export default async function handler(req: any, res: any) {
     }) : [];
 
     if (cleanedData.length === 0) {
-       // Log warning but return success empty to prevent UI crash
        console.warn("No data extracted.");
     }
 
